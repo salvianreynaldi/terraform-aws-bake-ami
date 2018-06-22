@@ -1,4 +1,4 @@
-resource "aws_codebuild_project" "bake_ami" {
+resource "aws_codebuild_project" "this" {
   name         = "${local.bake_pipeline_name}"
   description  = "Bake ${var.service_name} AMI"
   service_role = "${module.codebuild_role.role_arn}"
@@ -30,7 +30,7 @@ resource "aws_codebuild_project" "bake_ami" {
   }
 }
 
-resource "aws_codepipeline" "bake_ami" {
+resource "aws_codepipeline" "this" {
   name     = "${local.bake_pipeline_name}"
   role_arn = "${module.codepipeline_role.role_arn}"
 
@@ -72,7 +72,7 @@ resource "aws_codepipeline" "bake_ami" {
       version         = "1"
 
       configuration {
-        ProjectName = "${aws_codebuild_project.bake_ami.name}"
+        ProjectName = "${aws_codebuild_project.this.name}"
       }
 
       run_order = 1
@@ -212,4 +212,53 @@ resource "aws_iam_role_policy" "template_instance_additional" {
   role   = "${module.template_instance_role.role_name}"
   policy = "${var.additional_template_instance_permission[count.index]}"
   count  = "${length(var.additional_template_instance_permission)}"
+}
+
+module "pipeline_trigger_role" {
+  source                     = "github.com/traveloka/terraform-aws-iam-role.git//modules/service?ref=v0.4.3"
+  role_identifier            = "codebuild-trigger"
+  role_description           = "Service Role to trigger ${module.this.project_name} CodeBuild project"
+  role_force_detach_policies = true
+  role_max_session_duration  = 43200
+
+  aws_service = "events.amazonaws.com"
+}
+
+resource "aws_iam_role_policy" "pipeline_trigger_role_policy_main" {
+  name   = "${module.pipeline_trigger_role.role_name}-main"
+  role   = "${module.pipeline_trigger_role.role_name}"
+  policy = "${data.aws_iam_policy_document.allow_start_codepipeline.json}"
+}
+
+resource "aws_cloudwatch_event_rule" "pipeline_trigger_rule" {
+  name        = "${local.bake_pipeline_name}-trigger"
+  description = "Capture each upload action to s3://${var.playbook_bucket}/${var.playbook_key}"
+
+  event_pattern = <<PATTERN
+{
+  "source": [
+    "aws.s3"
+  ],
+  "detail-type": [
+    "AWS API Call via CloudTrail"
+  ],
+  "detail":{
+    "eventSource":[
+      "s3.amazonaws.com"
+    ],
+    "eventName":[
+      "PutObject"
+    ],
+    "resources":{
+      "ARN":["arn:aws:s3:::${var.playbook_bucket}/${var.playbook_key}"]
+    }
+  }
+}
+PATTERN
+}
+
+resource "aws_cloudwatch_event_target" "this" {
+  rule       = "${aws_cloudwatch_event_rule.pipeline_trigger_rule.name}"
+  arn        = "${aws_codepipeline.this.arn}"
+  input_path = "$.detail"
 }

@@ -467,6 +467,20 @@ data "aws_iam_policy_document" "codepipeline_codebuild" {
       "codebuild:StartBuild",
     ]
 
-    resources = ["arn:aws:codebuild:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:project/${aws_codebuild_project.bake_ami.name}"]
+    resources = ["arn:aws:codebuild:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:project/${aws_codebuild_project.this.name}"]
+  }
+}
+
+data "aws_iam_policy_document" "allow_start_codepipeline" {
+  statement {
+    effect = "Allow"
+
+    actions = [
+      "codepipeline:StartPipelineExecution",
+    ]
+
+    resources = [
+      "${aws_codepipeline.this.arn}",
+    ]
   }
 }
